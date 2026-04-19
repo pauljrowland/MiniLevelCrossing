@@ -1,6 +1,5 @@
 // ======================================================
-// LEVEL CROSSING CONTROLLER (FINAL UNIFIED VERSION)
-// Manual mode = AUTO behaviour + proper STOP reset
+// LEVEL CROSSING CONTROLLER (FINAL + 5s BUZZER LIMIT)
 // ======================================================
 
 
@@ -9,13 +8,14 @@
 const int sensorA = 2;
 const int sensorB = 3;
 
-const int button    = 4;  // manual toggle
+const int button    = 4;
 const int modeInput = 5;  // LOW = AUTO, HIGH = MANUAL
 
 const int yellowLight = A0;
 const int redLight1   = A2;
 const int redLight2   = A1;
 const int buzzer      = A3;
+const int whiteLight  = A4;
 
 
 // ---------------- RELAY LOGIC ----------------
@@ -63,10 +63,16 @@ const unsigned long blockTime = 5000;
 unsigned long lastFlashMillis = 0;
 const unsigned long flashInterval = 500;
 
+const unsigned long whiteDelay = 120;
+
+// 🔊 BUZZER TIMER (NEW)
+unsigned long buzzerStartMillis = 0;
+const unsigned long buzzerDuration = 5000; // 5 seconds
+
 bool flashState = false;
 
 
-// ---------------- FAST LOCKOUT ----------------
+// ---------------- LOCKOUT ----------------
 
 const unsigned long pulseLockout = 40;
 
@@ -101,6 +107,7 @@ void setup() {
   pinMode(redLight1, OUTPUT);
   pinMode(redLight2, OUTPUT);
   pinMode(buzzer, OUTPUT);
+  pinMode(whiteLight, OUTPUT);
 
   allOff();
 }
@@ -130,7 +137,7 @@ void loop() {
 
 
 // ======================================================
-// STATE MACHINE (USED BY BOTH MODES)
+// STATE MACHINE
 // ======================================================
 
 void runStateMachine(unsigned long now) {
@@ -138,6 +145,7 @@ void runStateMachine(unsigned long now) {
   switch (state) {
 
     case IDLE:
+      digitalWrite(whiteLight, RELAY_OFF);
       break;
 
     case STARTUP:
@@ -158,6 +166,7 @@ void runStateMachine(unsigned long now) {
     case RUNNING:
 
       if (occupancy <= 0) {
+
         occupancy = 0;
 
         allOff();
@@ -179,6 +188,8 @@ void runStateMachine(unsigned long now) {
 
     case BLOCKED:
 
+      digitalWrite(whiteLight, RELAY_OFF);
+
       if (now - blockMillis >= blockTime) {
         state = IDLE;
         direction = NONE;
@@ -189,7 +200,7 @@ void runStateMachine(unsigned long now) {
 
 
 // ======================================================
-// BUTTON HANDLER (MANUAL START / STOP FIXED)
+// BUTTON HANDLER
 // ======================================================
 
 void handleButton(unsigned long now, bool manualMode) {
@@ -204,15 +215,18 @@ void handleButton(unsigned long now, bool manualMode) {
 
     if (buttonState == HIGH && reading == LOW) {
 
-      crossingForced = !crossingForced;
-
       if (manualMode) {
 
+        crossingForced = !crossingForced;
+
         if (crossingForced) {
-          trigger(true);          // START (same as AUTO)
+          trigger(true);
         } else {
-          emergencyStop();        // STOP FIXED
+          emergencyStop();
         }
+
+      } else {
+        emergencyStop(); // AUTO MODE RESET
       }
     }
 
@@ -224,7 +238,7 @@ void handleButton(unsigned long now, bool manualMode) {
 
 
 // ======================================================
-// EMERGENCY STOP (MANUAL MODE FIX)
+// EMERGENCY STOP
 // ======================================================
 
 void emergencyStop() {
@@ -266,7 +280,7 @@ void checkSensorB(unsigned long now) {
 
 
 // ======================================================
-// CORE TRIGGER LOGIC
+// CORE LOGIC
 // ======================================================
 
 void trigger(bool fromA) {
@@ -276,7 +290,11 @@ void trigger(bool fromA) {
     state = STARTUP;
     startupMillis = millis();
 
+    // 🔊 START BUZZER TIMER (NEW)
+    buzzerStartMillis = millis();
+
     digitalWrite(yellowLight, RELAY_ON);
+    digitalWrite(whiteLight, RELAY_OFF);
 
     lastFlashMillis = millis();
     flashState = false;
@@ -303,29 +321,53 @@ void trigger(bool fromA) {
 
 
 // ======================================================
-// FLASH LOGIC
+// FLASH (WHITE DELAYED)
 // ======================================================
 
 void applyFlash() {
 
+  unsigned long now = millis();
+  unsigned long phaseTime = now - lastFlashMillis;
+
   if (flashState) {
+
     digitalWrite(redLight1, RELAY_ON);
     digitalWrite(redLight2, RELAY_OFF);
+
+    if (phaseTime >= whiteDelay) {
+      digitalWrite(whiteLight, RELAY_ON);
+    } else {
+      digitalWrite(whiteLight, RELAY_OFF);
+    }
+
   } else {
+
     digitalWrite(redLight1, RELAY_OFF);
     digitalWrite(redLight2, RELAY_ON);
+
+    if (phaseTime >= whiteDelay) {
+      digitalWrite(whiteLight, RELAY_ON);
+    } else {
+      digitalWrite(whiteLight, RELAY_OFF);
+    }
   }
 }
 
 
 // ======================================================
-// BUZZER
+// BUZZER (5 SECOND LIMIT)
 // ======================================================
 
 void updateBuzzer() {
 
   if (state == STARTUP || state == RUNNING) {
-    digitalWrite(buzzer, RELAY_ON);
+
+    if (millis() - buzzerStartMillis < buzzerDuration) {
+      digitalWrite(buzzer, RELAY_ON);
+    } else {
+      digitalWrite(buzzer, RELAY_OFF);
+    }
+
   } else {
     digitalWrite(buzzer, RELAY_OFF);
   }
@@ -342,4 +384,5 @@ void allOff() {
   digitalWrite(redLight1, RELAY_OFF);
   digitalWrite(redLight2, RELAY_OFF);
   digitalWrite(buzzer, RELAY_OFF);
+  digitalWrite(whiteLight, RELAY_OFF);
 }
