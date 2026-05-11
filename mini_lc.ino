@@ -1,28 +1,20 @@
-// ======================================================
-// LEVEL CROSSING CONTROLLER (FINAL + 5s BUZZER LIMIT)
-// ======================================================
-
-
 // ---------------- PIN CONFIG ----------------
 
-const int sensorA = 2;
-const int sensorB = 3;
+const int treadleA = 2;
+const int treadleB = 3;
 
-const int button    = 4;
-const int modeInput = 5;  // LOW = AUTO, HIGH = MANUAL
+const int manualStartStopButton    = 4;
+const int switchAutoManual = 5;  // LOW = AUTO, HIGH = MANUAL
 
 const int yellowLight = A0;
 const int redLight1   = A2;
 const int redLight2   = A1;
-const int buzzer      = A3;
-const int whiteLight  = A4;
-
+const int yodalarm      = A3;
 
 // ---------------- RELAY LOGIC ----------------
 
 const int RELAY_ON  = HIGH;
 const int RELAY_OFF = LOW;
-
 
 // ---------------- STATES ----------------
 
@@ -35,7 +27,6 @@ enum State {
 
 State state = IDLE;
 
-
 // ---------------- DIRECTION ----------------
 
 enum Direction {
@@ -46,31 +37,25 @@ enum Direction {
 
 Direction direction = NONE;
 
-
 // ---------------- VARIABLES ----------------
 
 int occupancy = 0;
 
-
 // ---------------- TIMING ----------------
 
-unsigned long startupMillis = 0;
-const unsigned long startupTime = 2000;
+unsigned long yellowMillis = 0;
+const unsigned long startupTime = 3000; // Yellow light duration
 
 unsigned long blockMillis = 0;
-const unsigned long blockTime = 5000;
+const unsigned long blockTime = 5000; // 5 Seconds before crossing can be activated again
 
 unsigned long lastFlashMillis = 0;
-const unsigned long flashInterval = 500;
+const unsigned long flashInterval = 500; // How often the reds flash
 
-const unsigned long whiteDelay = 120;
-
-// 🔊 BUZZER TIMER (NEW)
-unsigned long buzzerStartMillis = 0;
-const unsigned long buzzerDuration = 5000; // 5 seconds
+unsigned long yodalarmStartMillis = 0;
+const unsigned long yodalarmDuration = 10000; // Yodalarm duration
 
 bool flashState = false;
-
 
 // ---------------- LOCKOUT ----------------
 
@@ -79,17 +64,15 @@ const unsigned long pulseLockout = 40;
 unsigned long lastTriggerA = 0;
 unsigned long lastTriggerB = 0;
 
+// ---------------- manualStartStopButton ----------------
 
-// ---------------- BUTTON ----------------
+const unsigned long manualStartStopButtonDebounce = 50;
 
-const unsigned long buttonDebounce = 50;
-
-bool lastButtonReading = HIGH;
-bool buttonState = HIGH;
-unsigned long lastButtonChange = 0;
+bool lastmanualStartStopButtonReading = HIGH;
+bool manualStartStopButtonState = HIGH;
+unsigned long lastmanualStartStopButtonChange = 0;
 
 bool crossingForced = false;
-
 
 // ======================================================
 // SETUP
@@ -97,21 +80,19 @@ bool crossingForced = false;
 
 void setup() {
 
-  pinMode(sensorA, INPUT_PULLUP);
-  pinMode(sensorB, INPUT_PULLUP);
+  pinMode(treadleA, INPUT_PULLUP);
+  pinMode(treadleB, INPUT_PULLUP);
 
-  pinMode(button, INPUT_PULLUP);
-  pinMode(modeInput, INPUT_PULLUP);
+  pinMode(manualStartStopButton, INPUT_PULLUP);
+  pinMode(switchAutoManual, INPUT_PULLUP);
 
   pinMode(yellowLight, OUTPUT);
   pinMode(redLight1, OUTPUT);
   pinMode(redLight2, OUTPUT);
-  pinMode(buzzer, OUTPUT);
-  pinMode(whiteLight, OUTPUT);
+  pinMode(yodalarm, OUTPUT);
 
   allOff();
 }
-
 
 // ======================================================
 // MAIN LOOP
@@ -121,20 +102,19 @@ void loop() {
 
   unsigned long now = millis();
 
-  bool manualMode = digitalRead(modeInput) == HIGH;
+  bool manualMode = digitalRead(switchAutoManual) == HIGH;
 
-  handleButton(now, manualMode);
+  handlemanualStartStopButton(now, manualMode);
 
   if (!manualMode) {
-    checkSensorA(now);
-    checkSensorB(now);
+    checktreadleA(now);
+    checktreadleB(now);
   }
 
   runStateMachine(now);
 
-  updateBuzzer();
+  updateYodalarm();
 }
-
 
 // ======================================================
 // STATE MACHINE
@@ -145,12 +125,11 @@ void runStateMachine(unsigned long now) {
   switch (state) {
 
     case IDLE:
-      digitalWrite(whiteLight, RELAY_OFF);
       break;
 
     case STARTUP:
 
-      if (now - startupMillis >= startupTime) {
+      if (now - yellowMillis >= startupTime) {
 
         digitalWrite(yellowLight, RELAY_OFF);
 
@@ -188,32 +167,30 @@ void runStateMachine(unsigned long now) {
 
     case BLOCKED:
 
-      digitalWrite(whiteLight, RELAY_OFF);
-
       if (now - blockMillis >= blockTime) {
         state = IDLE;
         direction = NONE;
       }
       break;
   }
+  
 }
 
-
 // ======================================================
-// BUTTON HANDLER
+// manualStartStopButton HANDLER
 // ======================================================
 
-void handleButton(unsigned long now, bool manualMode) {
+void handlemanualStartStopButton(unsigned long now, bool manualMode) {
 
-  bool reading = digitalRead(button);
+  bool reading = digitalRead(manualStartStopButton);
 
-  if (reading != lastButtonReading) {
-    lastButtonChange = now;
+  if (reading != lastmanualStartStopButtonReading) {
+    lastmanualStartStopButtonChange = now;
   }
 
-  if ((now - lastButtonChange) > buttonDebounce) {
+  if ((now - lastmanualStartStopButtonChange) > manualStartStopButtonDebounce) {
 
-    if (buttonState == HIGH && reading == LOW) {
+    if (manualStartStopButtonState == HIGH && reading == LOW) {
 
       if (manualMode) {
 
@@ -230,12 +207,11 @@ void handleButton(unsigned long now, bool manualMode) {
       }
     }
 
-    buttonState = reading;
+    manualStartStopButtonState = reading;
   }
 
-  lastButtonReading = reading;
+  lastmanualStartStopButtonReading = reading;
 }
-
 
 // ======================================================
 // EMERGENCY STOP
@@ -251,16 +227,16 @@ void emergencyStop() {
   flashState = false;
 
   allOff();
+  
 }
-
 
 // ======================================================
 // SENSOR INPUTS
 // ======================================================
 
-void checkSensorA(unsigned long now) {
+void checktreadleA(unsigned long now) {
 
-  if (digitalRead(sensorA) == LOW) {
+  if (digitalRead(treadleA) == LOW) {
     if (now - lastTriggerA > pulseLockout) {
       lastTriggerA = now;
       trigger(true);
@@ -268,16 +244,15 @@ void checkSensorA(unsigned long now) {
   }
 }
 
-void checkSensorB(unsigned long now) {
+void checktreadleB(unsigned long now) {
 
-  if (digitalRead(sensorB) == LOW) {
+  if (digitalRead(treadleB) == LOW) {
     if (now - lastTriggerB > pulseLockout) {
       lastTriggerB = now;
       trigger(false);
     }
   }
 }
-
 
 // ======================================================
 // CORE LOGIC
@@ -288,13 +263,11 @@ void trigger(bool fromA) {
   if (state == IDLE) {
 
     state = STARTUP;
-    startupMillis = millis();
+    yellowMillis = millis();
 
-    // 🔊 START BUZZER TIMER (NEW)
-    buzzerStartMillis = millis();
+    yodalarmStartMillis = millis();
 
     digitalWrite(yellowLight, RELAY_ON);
-    digitalWrite(whiteLight, RELAY_OFF);
 
     lastFlashMillis = millis();
     flashState = false;
@@ -319,11 +292,6 @@ void trigger(bool fromA) {
   if (occupancy < 0) occupancy = 0;
 }
 
-
-// ======================================================
-// FLASH (WHITE DELAYED)
-// ======================================================
-
 void applyFlash() {
 
   unsigned long now = millis();
@@ -334,45 +302,30 @@ void applyFlash() {
     digitalWrite(redLight1, RELAY_ON);
     digitalWrite(redLight2, RELAY_OFF);
 
-    if (phaseTime >= whiteDelay) {
-      digitalWrite(whiteLight, RELAY_ON);
-    } else {
-      digitalWrite(whiteLight, RELAY_OFF);
-    }
 
   } else {
 
     digitalWrite(redLight1, RELAY_OFF);
     digitalWrite(redLight2, RELAY_ON);
 
-    if (phaseTime >= whiteDelay) {
-      digitalWrite(whiteLight, RELAY_ON);
-    } else {
-      digitalWrite(whiteLight, RELAY_OFF);
-    }
   }
+
 }
 
-
-// ======================================================
-// BUZZER (5 SECOND LIMIT)
-// ======================================================
-
-void updateBuzzer() {
+void updateYodalarm() {
 
   if (state == STARTUP || state == RUNNING) {
 
-    if (millis() - buzzerStartMillis < buzzerDuration) {
-      digitalWrite(buzzer, RELAY_ON);
+    if (millis() - yodalarmStartMillis < yodalarmDuration) {
+      digitalWrite(yodalarm, RELAY_ON);
     } else {
-      digitalWrite(buzzer, RELAY_OFF);
+      digitalWrite(yodalarm, RELAY_OFF);
     }
 
   } else {
-    digitalWrite(buzzer, RELAY_OFF);
+    digitalWrite(yodalarm, RELAY_OFF);
   }
 }
-
 
 // ======================================================
 // ALL OFF
@@ -383,6 +336,5 @@ void allOff() {
   digitalWrite(yellowLight, RELAY_OFF);
   digitalWrite(redLight1, RELAY_OFF);
   digitalWrite(redLight2, RELAY_OFF);
-  digitalWrite(buzzer, RELAY_OFF);
-  digitalWrite(whiteLight, RELAY_OFF);
+  digitalWrite(yodalarm, RELAY_OFF);
 }
