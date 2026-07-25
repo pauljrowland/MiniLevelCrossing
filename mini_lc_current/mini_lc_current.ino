@@ -18,7 +18,7 @@ const int RELAY_OFF = LOW;
 
 // ---------------- STATES ----------------
 
-enum State { IDLE, STARTUP, RUNNING, BLOCKED };
+enum State { IDLE, STARTUP, LAMPTEST, DARKGAP, RUNNING, BLOCKED };
 State state = IDLE;
 
 enum Direction { NONE, A_TO_B, B_TO_A };
@@ -27,6 +27,10 @@ Direction direction = NONE;
 // ---------------- VARIABLES ----------------
 
 int occupancy = 0;
+unsigned long lampTestMillis = 0;
+const unsigned long lampTestTime = 750;
+unsigned long darkGapMillis = 0;
+const unsigned long darkGapTime = 500;
 
 // ---------------- TIMING ----------------
 
@@ -123,17 +127,40 @@ void runStateMachine(unsigned long now) {
 
     case STARTUP:
 
-      if (now - yellowMillis >= startupTime) {
+if (now - yellowMillis >= startupTime) {
 
-        digitalWrite(yellowLight, RELAY_OFF);
+    // Yellow goes out
+    digitalWrite(yellowLight, RELAY_OFF);
+
+    // Begin lamp test
+    state = LAMPTEST;
+    lampTestMillis = now;
+
+    // Turn everything on
+    digitalWrite(redLight1, RELAY_ON);
+    digitalWrite(redLight2, RELAY_ON);
+}
+      break;
+    
+    case LAMPTEST:
+
+    if (now - lampTestMillis >= lampTestTime) {
+        digitalWrite(redLight1, RELAY_OFF);
+        digitalWrite(redLight2, RELAY_OFF);
+        state = DARKGAP;
+        darkGapMillis = now;
+    }
+    break;
+
+    case DARKGAP:
+
+    if (now - darkGapMillis >= darkGapTime) {
         state = RUNNING;
-
         lastFlashMillis = now;
         flashState = false;
-
         applyFlash();
-      }
-      break;
+    }
+    break;
 
     case RUNNING:
 
@@ -321,7 +348,7 @@ void applyFlash() {
 
 void updateyodAlarm() {
 
-  if (state == STARTUP || state == RUNNING)
+if (state == STARTUP || state == LAMPTEST || state == DARKGAP || state == RUNNING)
     digitalWrite(yodAlarm, RELAY_ON);
   else
     digitalWrite(yodAlarm, RELAY_OFF);
