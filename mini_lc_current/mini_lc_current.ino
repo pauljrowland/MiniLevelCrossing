@@ -18,7 +18,7 @@ const int RELAY_OFF = LOW;
 
 // ---------------- STATES ----------------
 
-enum State { IDLE, STARTUP, LAMPTEST, DARKGAP, RUNNING, BLOCKED };
+enum State { IDLE, STARTUP, LAMPTEST, RUNNING, BLOCKED };
 State state = IDLE;
 
 enum Direction { NONE, A_TO_B, B_TO_A };
@@ -28,9 +28,7 @@ Direction direction = NONE;
 
 int occupancy = 0;
 unsigned long lampTestMillis = 0;
-const unsigned long lampTestTime = 750;
-unsigned long darkGapMillis = 0;
-const unsigned long darkGapTime = 500;
+const unsigned long lampTestTime = 1000;
 
 // ---------------- TIMING ----------------
 
@@ -127,40 +125,37 @@ void runStateMachine(unsigned long now) {
 
     case STARTUP:
 
-if (now - yellowMillis >= startupTime) {
+      if (now - yellowMillis >= startupTime) {
 
-    // Yellow goes out
-    digitalWrite(yellowLight, RELAY_OFF);
+        // Yellow goes off
+        digitalWrite(yellowLight, RELAY_OFF);
 
-    // Begin lamp test
-    state = LAMPTEST;
-    lampTestMillis = now;
+        // Both reds come on immediately
+        digitalWrite(redLight1, RELAY_ON);
+        digitalWrite(redLight2, RELAY_ON);
 
-    // Turn everything on
-    digitalWrite(redLight1, RELAY_ON);
-    digitalWrite(redLight2, RELAY_ON);
-}
+        // Start 750 ms lamp test
+        state = LAMPTEST;
+        lampTestMillis = now;
+      }
+
       break;
-    
+
     case LAMPTEST:
 
-    if (now - lampTestMillis >= lampTestTime) {
-        digitalWrite(redLight1, RELAY_OFF);
-        digitalWrite(redLight2, RELAY_OFF);
-        state = DARKGAP;
-        darkGapMillis = now;
-    }
-    break;
+      if (now - lampTestMillis >= lampTestTime) {
 
-    case DARKGAP:
-
-    if (now - darkGapMillis >= darkGapTime) {
+        // Start normal alternating sequence immediately.
+        // Red 1 remains ON; Red 2 turns OFF.
         state = RUNNING;
+
         lastFlashMillis = now;
-        flashState = false;
+        flashState = true;
+
         applyFlash();
-    }
-    break;
+      }
+
+      break;
 
     case RUNNING:
 
@@ -348,7 +343,7 @@ void applyFlash() {
 
 void updateyodAlarm() {
 
-if (state == STARTUP || state == LAMPTEST || state == DARKGAP || state == RUNNING)
+if (state == STARTUP || state == LAMPTEST || state == RUNNING)
     digitalWrite(yodAlarm, RELAY_ON);
   else
     digitalWrite(yodAlarm, RELAY_OFF);
